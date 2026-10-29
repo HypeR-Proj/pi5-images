@@ -41,7 +41,7 @@ containing all three profiles. Public publication remains manual.
 
 Components retain their individual licenses; HypeR-authored code remains
 Apache-2.0. The companion materials archive supplies the source archives and
-notices listed in [DISTRIBUTION.md](https://github.com/roolrz/HypeR-pi5-images/blob/main/DISTRIBUTION.md).
+notices listed in [DISTRIBUTION.md](https://github.com/HypeR-Proj/pi5-images/blob/main/DISTRIBUTION.md).
 
 Native and diskless I/O profiles run QEMU boot/console smoke tests. The full SD
 profile has no automated physical-board test; these builds do not record SD

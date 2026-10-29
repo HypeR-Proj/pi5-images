@@ -18,51 +18,69 @@ spec.loader.exec_module(build)
 
 
 class BuildTests(unittest.TestCase):
-    def test_stale_io_materials_stop_before_build_or_checkout_return(self):
+    def test_invalid_io_package_stops_before_image_build(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "hyper.lock.json").write_text("{}")
-            (root / "materials").mkdir()
-            (root / "materials/io-libc.json").write_text(
-                json.dumps({"io_manifest_sha256": "old", "source_revision": "old"})
+            hyper = root / "system"
+            hyper.mkdir()
+            (hyper / "source-inventory.json").write_text(
+                json.dumps({"components": {"io-vm": {"commit": "new"}}})
             )
-            hyper = root / "work/HypeR"
-            (hyper / "scripts").mkdir(parents=True)
-            (hyper / "scripts/io-vm.lock.json").write_text(
-                json.dumps(
-                    {
-                        "platforms": {
-                            "rpi5": {
-                                "reference": "example@sha256:new",
-                                "source_revision": "new",
-                            }
-                        }
-                    }
-                )
-            )
+            package = root / "package"
+            (package / "materials").mkdir(parents=True)
             for profile in ("io-bringup", "sd"):
-                for mode in ([], ["--checkout-only"]):
-                    with (
-                        self.subTest(profile=profile, mode=mode),
-                        patch.object(build, "ROOT", root),
-                        patch.object(build, "checkout_hyper", return_value=hyper),
-                        patch.object(build, "build_image") as compile_image,
-                        patch.object(
-                            sys, "argv", ["build.py", "--profile", profile] + mode
-                        ),
+                with (
+                    self.subTest(profile=profile),
+                    patch.object(build, "ROOT", root),
+                    patch.object(build, "build_image") as compile_image,
+                    patch.object(
+                        build,
+                        "validate_io_materials",
+                        side_effect=ValueError("package checksum mismatch"),
+                    ),
+                    patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "build.py",
+                            "--profile",
+                            profile,
+                            "--source",
+                            str(hyper),
+                            "--io-package",
+                            str(package),
+                        ],
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "package checksum mismatch"
                     ):
-                        with self.assertRaisesRegex(ValueError, "I/O VM changed"):
-                            build.main()
-                        compile_image.assert_not_called()
-                        self.assertFalse((root / "dist").exists())
+                        build.main()
+                    compile_image.assert_not_called()
+                    self.assertFalse((root / "dist").exists())
+
+    def test_default_io_uses_a_published_package_without_compilation(self):
+        with (
+            patch.object(
+                build.subprocess, "check_output", return_value="/cache/digest\n"
+            ) as fetch,
+            patch.object(build, "validate_io_materials") as validate,
+            patch.object(build, "run") as compile_source,
+        ):
+            result = build.prepare_io(Path("/workspace"), None)
+        self.assertEqual(result, Path("/cache/digest"))
+        self.assertIn("--materials", fetch.call_args.args[0])
+        self.assertIn("/workspace/scripts/fetch-io-vm.py", fetch.call_args.args[0])
+        compile_source.assert_not_called()
+        validate.assert_called_once_with(Path("/workspace"), result)
 
     def test_native_checkout_needs_no_io_materials(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "hyper.lock.json").write_text("{}")
+            (root / "source-inventory.json").write_text("{}")
             with (
                 patch.object(build, "ROOT", root),
-                patch.object(build, "checkout_hyper", return_value=root / "HypeR"),
+                patch.object(build, "checkout_hyper", return_value=root),
                 patch.object(build, "build_image") as compile_image,
                 patch.object(
                     sys, "argv", ["build.py", "--profile", "native", "--checkout-only"]

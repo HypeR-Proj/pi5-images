@@ -1,7 +1,8 @@
+# SPDX-FileCopyrightText: 2026 roolrz
+# SPDX-License-Identifier: Apache-2.0
+
 name: Pi 5 image
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       profile:
@@ -27,15 +28,16 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout pinned HypeR and check I/O libc provenance
+      - name: Resolve rolling HypeR source inputs
         env:
           PROFILE: ${{ matrix.profile }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/build.py --profile "$PROFILE" --checkout-only
       - name: Install build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang cmake cpio lld llvm make \
-            dosfstools mtools e2fsprogs squashfs-tools device-tree-compiler xz-utils qemu-system-arm
+            dosfstools mtools e2fsprogs erofs-utils squashfs-tools device-tree-compiler xz-utils qemu-system-arm
           toolchain=$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' work/HypeR/rust-toolchain.toml)
           test -n "$toolchain"
           rustup toolchain install "$toolchain" --profile minimal \
@@ -72,7 +74,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   release:
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.release)
+    if: github.event_name == 'workflow_dispatch' && inputs.release
     needs: build
     runs-on: ubuntu-24.04
     permissions:

@@ -60,7 +60,7 @@ def collect_rust(hyper, output, cache):
         for package in tomllib.loads(lock.read_text())["package"]:
             source = package.get("source", "")
             if not source:
-                continue  # In-tree dependencies are in HypeR-source.tar.gz.
+                continue  # In-tree dependencies are in HypeR-source.tar.xz.
             if source != "registry+https://github.com/rust-lang/crates.io-index":
                 raise ValueError(f"unsupported dependency source: {source}")
             key = (package["name"], package["version"])

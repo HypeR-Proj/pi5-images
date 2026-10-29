@@ -4,6 +4,7 @@ permissions:
   contents: read
 jobs:
   check:
+    name: module
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -12,6 +13,4 @@ jobs:
       - run: python3 -m compileall -q scripts tests
       - run: python3 scripts/build.py --help
       - run: python3 -m unittest discover -s tests
-      - name: Check pinned I/O libc provenance
-        run: python3 scripts/build.py --profile sd --checkout-only
       - run: git diff --check

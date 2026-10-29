@@ -3,9 +3,9 @@
 
 # HypeR Pi 5 images
 
-Downloadable Raspberry Pi 5 SD-card images for [HypeR](https://github.com/roolrz/HypeR).
+Downloadable Raspberry Pi 5 SD-card images for [HypeR](https://github.com/HypeR-Proj/HypeR).
 For HypeR with the Linux I/O VM, SD storage and an Alpine guest, choose
-**`hyper-rpi5-sd.img.xz`** from [Releases](https://github.com/roolrz/HypeR-pi5-images/releases).
+**`hyper-rpi5-sd.img.xz`** from [Releases](https://github.com/HypeR-Proj/pi5-images/releases).
 See [ARTIFACTS.md](ARTIFACTS.md) for the smaller bring-up images and flashing instructions.
 
 ## Downloads
@@ -21,40 +21,20 @@ Flashing replaces existing partitions and data. The board's EEPROM is not update
 
 ## Builds and versions
 
-`hyper.lock.json` pins one HypeR commit. I/O VM, official Pi boot inputs and
-Alpine versions follow that commit's dependency locks. This repository composes
-images using HypeR's build targets; it does not maintain a separate Linux build.
-You can also build locally from a HypeR checkout without this repository.
+The manual image workflow resolves each HypeR component's `main` once and records the
+result in `source-inventory.json`. There is no HypeR version pin to advance. Kernel,
+firmware and Alpine upstream versions still follow their owning component's dependency policy.
 
-When updating the HypeR pin, check whether its Pi 5 I/O VM lock changed. If so,
-update `materials/io-libc.json` from that appliance's actual build log, including
-its manifest digest, source revision and libc package versions. Recipe checks and
-image builds verify this identity before compiling; `--profile native` does not
-require I/O VM materials. Run `python3 scripts/build.py --profile sd --checkout-only`
-to fetch the pinned HypeR sources and check the I/O libc provenance without building.
+For I/O profiles, the latest qualified RPi5 I/O VM package is resolved to an
+immutable digest. Runtime files, kernel configuration and corresponding sources
+come from that same OCI manifest. The package's actual source revision is recorded
+in the distributed manifest; it need not equal the current I/O VM source checkout.
+No appliance compilation is needed. Use `python3 scripts/build.py --checkout-only`
+to resolve source inputs first.
 
-Each update to `main` builds all three profiles and, after successful completion,
-creates a Draft Release with compressed images, companion materials and checksums.
-Publication is manual. Actions artifacts are available for seven days. Manual
-workflow runs can select one profile and optionally create a draft.
-
-For a local Linux build, install HypeR's documented toolchain and image tools,
-then run `python3 scripts/build.py --profile sd`. The build uses `work/HypeR`
-and writes `dist/sd`; use a fresh output directory for another build.
-
-## Licenses
-
-HypeR-authored code and this repository's build scripts are Apache-2.0.
-Images also contain independently licensed components, including Linux and
-BusyBox. Each component retains its own license. See
-[DISTRIBUTION.md](DISTRIBUTION.md) for component information and the contents
-of the accompanying source and notice archives.
-
-## Validation
-
-Native and diskless I/O images run a QEMU GICv2 boot/console smoke test during
-assembly. The full SD profile is built but has no automated physical-board test.
-Release-specific results belong with the corresponding image version.
+PRs run recipe self tests. Image creation and system acceptance are manual. A successful image
+workflow can create a draft prerelease; publication remains an explicit release action.
+QEMU smoke tests cover Native and I/O payloads, not physical Pi 5 hardware qualification.
 
 ## Script checks
 
@@ -66,3 +46,10 @@ python3 -m unittest discover -s tests
 ```
 
 Run `python3 -m black scripts tests` to apply the shared format.
+
+## HypeR workspace integration
+
+This repository is part of the [HypeR workspace](https://github.com/HypeR-Proj/HypeR).
+The image workflow is manual. It resolves current component `main` branches once per build;
+`source-inventory.json` records the selected inputs. `materials/legacy` is historical only.
+Appliance build records carry matching libc sources; there is no HypeR revision to advance manually.

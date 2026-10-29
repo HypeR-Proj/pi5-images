@@ -1,0 +1,4 @@
+# SPDX-FileCopyrightText: 2026 roolrz
+# SPDX-License-Identifier: Apache-2.0
+
+comment "pi5-images: configured by its build profiles"
