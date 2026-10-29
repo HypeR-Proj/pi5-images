@@ -25,10 +25,12 @@ The manual image workflow resolves each HypeR component's `main` once and record
 result in `source-inventory.json`. There is no HypeR version pin to advance. Kernel,
 firmware and Alpine upstream versions still follow their owning component's dependency policy.
 
-For I/O profiles, the selected `io-vm` source is built and its exported package must match
-the source inventory. Corresponding sources include the installed cross libc's exact source
-packages and retained runtime notices. Historical records in `materials/legacy` are not inputs
-to new builds. Use `python3 scripts/build.py --checkout-only` to resolve source inputs first.
+For I/O profiles, the latest qualified RPi5 I/O VM package is resolved to an
+immutable digest. Runtime files, kernel configuration and corresponding sources
+come from that same OCI manifest. The package's actual source revision is recorded
+in the distributed manifest; it need not equal the current I/O VM source checkout.
+No appliance compilation is needed. Use `python3 scripts/build.py --checkout-only`
+to resolve source inputs first.
 
 PRs run recipe self tests. Image creation and system acceptance are manual. A successful image
 workflow can create a draft prerelease; publication remains an explicit release action.

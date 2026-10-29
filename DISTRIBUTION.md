@@ -13,7 +13,7 @@ Apache-2.0 license covers its build scripts, not every file in the disk image.
 | Component | License information | Accompanying materials |
 | --- | --- | --- |
 | Image build scripts | Apache-2.0 | This repository's LICENSE and release commit |
-| HypeR-authored kernel, applications and SDK | Apache-2.0 | HypeR-LICENSE, HypeR-NOTICE when present, HypeR-source.tar.gz |
+| HypeR-authored kernel, applications and SDK | Apache-2.0 | HypeR-LICENSE, HypeR-NOTICE when present, HypeR-source.tar.xz |
 | Rust standard library, runtime and linked crates | Respective upstream licenses | rust-materials.tar.gz: lockfile-selected registry source archives, original license files, assembled patched std source and COPYRIGHT-library.html |
 | I/O VM Linux and bridge modules | Linux license terms and per-file exceptions; bridge modules GPL-2.0-only | io-vm-sources.tar.xz, io-vm-kernel.config, io-vm.lock.json and io-vm-manifest.json |
 | I/O VM BusyBox and services | BusyBox GPL terms; project-authored services Apache-2.0; linked libraries retain their own licenses | Appliance sources and build configuration in io-vm-sources.tar.xz; the libc-materials directory in that archive supplies the identified glibc sources, Ubuntu patches/build recipes and GCC runtime license texts |

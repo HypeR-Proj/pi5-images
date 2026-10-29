@@ -55,7 +55,7 @@ def checkout_hyper():
         "--output",
         str(snapshot),
     )
-    sources = ROOT / "work/sources"
+    sources = hyper
     run(
         sys.executable,
         str(control / "ci/tools/workspace.py"),
@@ -67,11 +67,9 @@ def checkout_hyper():
     )
     run(
         sys.executable,
-        str(sources / "build/project.py"),
+        str(sources / "project.py"),
         "--workspace",
         str(sources),
-        "--output",
-        str(hyper),
         "prepare",
     )
     return hyper
@@ -120,14 +118,10 @@ def collect_hyper_materials(hyper, dist, revision):
         if (hyper / name).exists():
             shutil.copy2(hyper / name, dist / f"HypeR-{name}")
     run(
-        "git",
-        "-C",
-        str(hyper),
+        sys.executable,
+        str(hyper / "project.py"),
         "archive",
-        "--format=tar.gz",
-        "-o",
-        str(dist / "HypeR-source.tar.gz"),
-        revision,
+        str(dist / "HypeR-source.tar.xz"),
     )
     shutil.copy2(hyper / "source-inventory.json", dist / "source-inventory.json")
 
@@ -147,15 +141,21 @@ def collect_boot_materials(hyper, dist):
 
 
 def validate_io_materials(hyper, package):
-    inventory = json.loads((hyper / "source-inventory.json").read_text())
-    metadata = json.loads((package / "materials/manifest.json").read_text())
-    boot = json.loads((package / "boot-artifacts.json").read_text())
-    if boot["base_manifest_sha256"] != sha(package / "materials/manifest.json"):
-        raise ValueError("I/O VM runtime and source build records differ")
-    if metadata["source_revision"] != inventory["components"]["io-vm"]["commit"]:
-        raise ValueError("I/O VM source differs from the selected workspace")
-    if metadata["source_dirty"] or metadata["platform"] != "rpi5":
-        raise ValueError("release requires a clean RPi5 I/O VM build")
+    specification = importlib.util.spec_from_file_location(
+        "io_importer", hyper / "scripts/fetch-io-vm.py"
+    )
+    importer = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(importer)
+    layers = importer.validate_manifest(
+        package / "oci-manifest.json", "sha256:" + package.name, "rpi5"
+    )
+    importer.validate_runtime(package, layers)
+    for name in ("kernel.config", "sources.tar.xz"):
+        importer.checked_file(package / "materials" / name, layers[name])
+    metadata = json.loads((package / "oci-manifest.json").read_text())
+    revision = metadata["annotations"].get("org.opencontainers.image.revision", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("published package does not identify its source revision")
     with tarfile.open(package / "materials/sources.tar.xz") as archive:
         member = archive.getmember("libc-materials/manifest.json")
         if not member.isfile() or member.size > 1024 * 1024:
@@ -176,42 +176,25 @@ def validate_io_materials(hyper, package):
 
 def prepare_io(hyper, package):
     if package is None:
-        source = ROOT / "work/sources/io-vm"
-        if not source.is_dir():
-            raise ValueError("--source requires --io-package for an I/O image")
-        package = ROOT / "work/io-package"
-        if not package.exists():
-            run(
-                sys.executable,
-                "tools/libc-materials.py",
-                "--output",
-                "target/io-vm/libc-materials",
-                cwd=source,
-            )
-            run(
-                "make",
-                "base",
-                "PLATFORM=rpi5",
-                "CROSS_COMPILE=aarch64-linux-gnu-",
-                "JOBS=4",
-                cwd=source,
-            )
-            run(
-                sys.executable,
-                "tools/export-package.py",
-                "--platform",
-                "rpi5",
-                "--output",
-                str(package),
-                cwd=source,
-            )
+        package = Path(
+            subprocess.check_output(
+                [
+                    sys.executable,
+                    str(hyper / "scripts/fetch-io-vm.py"),
+                    "--platform",
+                    "rpi5",
+                    "--materials",
+                ],
+                text=True,
+            ).strip()
+        )
     validate_io_materials(hyper, package)
     return package
 
 
 def collect_io_materials(package, dist):
+    shutil.copy2(package / "oci-manifest.json", dist / "io-vm-oci-manifest.json")
     for source, target in (
-        ("manifest.json", "io-vm-build.json"),
         ("sources.tar.xz", "io-vm-sources.tar.xz"),
         ("kernel.config", "io-vm-kernel.config"),
     ):
@@ -250,11 +233,9 @@ def main():
     parser.add_argument(
         "--checkout-only",
         action="store_true",
-        help="resolve and assemble source inputs without building",
+        help="resolve and check out sources without building",
     )
-    parser.add_argument(
-        "--source", type=Path, help="already assembled, resolved system source"
-    )
+    parser.add_argument("--source", type=Path, help="already resolved repo workspace")
     parser.add_argument(
         "--io-package",
         type=Path,

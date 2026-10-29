@@ -19,7 +19,7 @@ class BundleTests(unittest.TestCase):
         profile.mkdir(parents=True)
         (profile / "hyper-rpi5-native.img.xz").write_bytes(b"image fixture")
         (profile / "inventory.json").write_text("{}\n")
-        (profile / "HypeR-source.tar.gz").write_bytes(b"source fixture")
+        (profile / "HypeR-source.tar.xz").write_bytes(b"source fixture")
         (profile / "SHA256SUMS").write_text(
             "".join(f"{bundle.sha(p)}  {p.name}\n" for p in sorted(profile.iterdir()))
         )
@@ -37,7 +37,7 @@ class BundleTests(unittest.TestCase):
             with tarfile.open(
                 root / "output/hyper-rpi5-native-materials.tar.xz"
             ) as archive:
-                self.assertIn("HypeR-source.tar.gz", archive.getnames())
+                self.assertIn("HypeR-source.tar.xz", archive.getnames())
                 self.assertIn("inventory.json", archive.getnames())
                 self.assertNotIn("hyper-rpi5-native.img.xz", archive.getnames())
             for line in (root / "output/SHA256SUMS").read_text().splitlines():

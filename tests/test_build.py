@@ -18,7 +18,7 @@ spec.loader.exec_module(build)
 
 
 class BuildTests(unittest.TestCase):
-    def test_unmatched_io_source_stops_before_image_build(self):
+    def test_invalid_io_package_stops_before_image_build(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             hyper = root / "system"
@@ -28,16 +28,16 @@ class BuildTests(unittest.TestCase):
             )
             package = root / "package"
             (package / "materials").mkdir(parents=True)
-            metadata = package / "materials/manifest.json"
-            metadata.write_text(json.dumps({"source_revision": "old"}))
-            (package / "boot-artifacts.json").write_text(
-                json.dumps({"base_manifest_sha256": build.sha(metadata)})
-            )
             for profile in ("io-bringup", "sd"):
                 with (
                     self.subTest(profile=profile),
                     patch.object(build, "ROOT", root),
                     patch.object(build, "build_image") as compile_image,
+                    patch.object(
+                        build,
+                        "validate_io_materials",
+                        side_effect=ValueError("package checksum mismatch"),
+                    ),
                     patch.object(
                         sys,
                         "argv",
@@ -53,11 +53,26 @@ class BuildTests(unittest.TestCase):
                     ),
                 ):
                     with self.assertRaisesRegex(
-                        ValueError, "differs from the selected workspace"
+                        ValueError, "package checksum mismatch"
                     ):
                         build.main()
                     compile_image.assert_not_called()
                     self.assertFalse((root / "dist").exists())
+
+    def test_default_io_uses_a_published_package_without_compilation(self):
+        with (
+            patch.object(
+                build.subprocess, "check_output", return_value="/cache/digest\n"
+            ) as fetch,
+            patch.object(build, "validate_io_materials") as validate,
+            patch.object(build, "run") as compile_source,
+        ):
+            result = build.prepare_io(Path("/workspace"), None)
+        self.assertEqual(result, Path("/cache/digest"))
+        self.assertIn("--materials", fetch.call_args.args[0])
+        self.assertIn("/workspace/scripts/fetch-io-vm.py", fetch.call_args.args[0])
+        compile_source.assert_not_called()
+        validate.assert_called_once_with(Path("/workspace"), result)
 
     def test_native_checkout_needs_no_io_materials(self):
         with tempfile.TemporaryDirectory() as temporary:

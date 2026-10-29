@@ -1,4 +1,6 @@
 {
+  "SPDX-FileCopyrightText": "2026 roolrz",
+  "SPDX-License-Identifier": "Apache-2.0",
   "version": 1,
   "name": "pi5-images",
   "kind": "distribution",
@@ -6,8 +8,6 @@
     "repository": "https://github.com/roolrz/HypeR-pi5-images",
     "commit": "5b43b1f2e283e2b297b1294b0eec7fd4cf041118"
   },
-  "sources": {},
-  "mounts": {},
   "tests": [
     [
       "python3",
@@ -18,7 +18,5 @@
       "{component}/tests"
     ]
   ],
-  "packages": [],
-  "SPDX-FileCopyrightText": "2026 roolrz",
-  "SPDX-License-Identifier": "Apache-2.0"
+  "packages": []
 }
