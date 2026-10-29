@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 roolrz
+# SPDX-License-Identifier: Apache-2.0
+
 name: Pi 5 image
 on:
   workflow_dispatch:
@@ -34,8 +37,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang cmake cpio lld llvm make \
-            dosfstools mtools e2fsprogs erofs-utils squashfs-tools device-tree-compiler xz-utils qemu-system-arm \
-            gcc-aarch64-linux-gnu libc6-dev-arm64-cross bison flex bc libssl-dev libelf-dev python3-venv ninja-build pkg-config kmod
+            dosfstools mtools e2fsprogs erofs-utils squashfs-tools device-tree-compiler xz-utils qemu-system-arm
           toolchain=$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' work/HypeR/rust-toolchain.toml)
           test -n "$toolchain"
           rustup toolchain install "$toolchain" --profile minimal \
