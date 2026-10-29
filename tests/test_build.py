@@ -18,51 +18,54 @@ spec.loader.exec_module(build)
 
 
 class BuildTests(unittest.TestCase):
-    def test_stale_io_materials_stop_before_build_or_checkout_return(self):
+    def test_unmatched_io_source_stops_before_image_build(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "hyper.lock.json").write_text("{}")
-            (root / "materials").mkdir()
-            (root / "materials/io-libc.json").write_text(
-                json.dumps({"io_manifest_sha256": "old", "source_revision": "old"})
+            hyper = root / "system"
+            hyper.mkdir()
+            (hyper / "source-inventory.json").write_text(
+                json.dumps({"components": {"io-vm": {"commit": "new"}}})
             )
-            hyper = root / "work/HypeR"
-            (hyper / "scripts").mkdir(parents=True)
-            (hyper / "scripts/io-vm.lock.json").write_text(
-                json.dumps(
-                    {
-                        "platforms": {
-                            "rpi5": {
-                                "reference": "example@sha256:new",
-                                "source_revision": "new",
-                            }
-                        }
-                    }
-                )
+            package = root / "package"
+            (package / "materials").mkdir(parents=True)
+            metadata = package / "materials/manifest.json"
+            metadata.write_text(json.dumps({"source_revision": "old"}))
+            (package / "boot-artifacts.json").write_text(
+                json.dumps({"base_manifest_sha256": build.sha(metadata)})
             )
             for profile in ("io-bringup", "sd"):
-                for mode in ([], ["--checkout-only"]):
-                    with (
-                        self.subTest(profile=profile, mode=mode),
-                        patch.object(build, "ROOT", root),
-                        patch.object(build, "checkout_hyper", return_value=hyper),
-                        patch.object(build, "build_image") as compile_image,
-                        patch.object(
-                            sys, "argv", ["build.py", "--profile", profile] + mode
-                        ),
+                with (
+                    self.subTest(profile=profile),
+                    patch.object(build, "ROOT", root),
+                    patch.object(build, "build_image") as compile_image,
+                    patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "build.py",
+                            "--profile",
+                            profile,
+                            "--source",
+                            str(hyper),
+                            "--io-package",
+                            str(package),
+                        ],
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "differs from the selected workspace"
                     ):
-                        with self.assertRaisesRegex(ValueError, "I/O VM changed"):
-                            build.main()
-                        compile_image.assert_not_called()
-                        self.assertFalse((root / "dist").exists())
+                        build.main()
+                    compile_image.assert_not_called()
+                    self.assertFalse((root / "dist").exists())
 
     def test_native_checkout_needs_no_io_materials(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "hyper.lock.json").write_text("{}")
+            (root / "source-inventory.json").write_text("{}")
             with (
                 patch.object(build, "ROOT", root),
-                patch.object(build, "checkout_hyper", return_value=root / "HypeR"),
+                patch.object(build, "checkout_hyper", return_value=root),
                 patch.object(build, "build_image") as compile_image,
                 patch.object(
                     sys, "argv", ["build.py", "--profile", "native", "--checkout-only"]

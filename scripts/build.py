@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 roolrz
 # SPDX-License-Identifier: Apache-2.0
-"""Compose release assets using only the pinned HypeR build policy."""
+"""Compose release assets from an automatically resolved HypeR workspace."""
 
 import argparse
 import hashlib
@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import materials
@@ -29,28 +30,54 @@ def sha(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def checkout_hyper(lock):
-    revision = lock["revision"]
-    if (
-        not re.fullmatch("[0-9a-f]{40}", revision)
-        or lock["repository"] != "https://github.com/roolrz/HypeR.git"
-    ):
-        raise ValueError("expected an immutable official HypeR commit")
+def checkout_hyper():
+    """Reuse this build's snapshot; a fresh work directory resolves latest main."""
     hyper = ROOT / "work/HypeR"
-    if not hyper.exists():
-        hyper.mkdir(parents=True)
-        run("git", "init", str(hyper))
-        run("git", "-C", str(hyper), "remote", "add", "origin", lock["repository"])
-    if subprocess.check_output(
-        ["git", "-C", str(hyper), "status", "--porcelain"]
-    ).strip():
-        raise ValueError("build checkout has local changes")
-    run("git", "-C", str(hyper), "fetch", "--depth=1", "origin", revision)
-    run("git", "-C", str(hyper), "checkout", "--detach", revision)
+    if (hyper / "source-inventory.json").exists():
+        return hyper
+    control = ROOT / "work/control"
+    control.mkdir(parents=True, exist_ok=True)
+    for name in ("ci", "manifest"):
+        run(
+            "git",
+            "clone",
+            "--depth=1",
+            f"https://github.com/HypeR-Proj/{name}.git",
+            str(control / name),
+        )
+    snapshot = ROOT / "work/source-snapshot.json"
+    run(
+        sys.executable,
+        str(control / "ci/tools/workspace.py"),
+        "resolve",
+        "--manifest",
+        str(control / "manifest/default.xml"),
+        "--output",
+        str(snapshot),
+    )
+    sources = ROOT / "work/sources"
+    run(
+        sys.executable,
+        str(control / "ci/tools/workspace.py"),
+        "checkout",
+        "--snapshot",
+        str(snapshot),
+        "--directory",
+        str(sources),
+    )
+    run(
+        sys.executable,
+        str(sources / "build/project.py"),
+        "--workspace",
+        str(sources),
+        "--output",
+        str(hyper),
+        "prepare",
+    )
     return hyper
 
 
-def build_image(hyper, profile):
+def build_image(hyper, profile, io_package=None):
     target = {
         "native": "rpi5-bringup",
         "io-bringup": "rpi5-io-bringup",
@@ -63,6 +90,8 @@ def build_image(hyper, profile):
         if not name.startswith(("IO_VM_", "RPI5_", "BOARD_", "NATIVE_"))
         and name not in ("MAKEFLAGS", "MAKEOVERRIDES")
     }
+    if io_package is not None:
+        env["IO_VM_PACKAGE"] = str(io_package)
     run(
         "make",
         target,
@@ -100,7 +129,7 @@ def collect_hyper_materials(hyper, dist, revision):
         str(dist / "HypeR-source.tar.gz"),
         revision,
     )
-    shutil.copy2(ROOT / "hyper.lock.json", dist / "hyper.lock.json")
+    shutil.copy2(hyper / "source-inventory.json", dist / "source-inventory.json")
 
 
 def collect_boot_materials(hyper, dist):
@@ -117,53 +146,76 @@ def collect_boot_materials(hyper, dist):
         shutil.copy2(boot / source, dist / name)
 
 
-def collect_io_materials(hyper, dist):
-    io_lock = json.loads((hyper / "scripts/io-vm.lock.json").read_text())
-    shutil.copy2(hyper / "scripts/io-vm.lock.json", dist / "io-vm.lock.json")
-    package = Path(
-        subprocess.check_output(
-            [
+def validate_io_materials(hyper, package):
+    inventory = json.loads((hyper / "source-inventory.json").read_text())
+    metadata = json.loads((package / "materials/manifest.json").read_text())
+    boot = json.loads((package / "boot-artifacts.json").read_text())
+    if boot["base_manifest_sha256"] != sha(package / "materials/manifest.json"):
+        raise ValueError("I/O VM runtime and source build records differ")
+    if metadata["source_revision"] != inventory["components"]["io-vm"]["commit"]:
+        raise ValueError("I/O VM source differs from the selected workspace")
+    if metadata["source_dirty"] or metadata["platform"] != "rpi5":
+        raise ValueError("release requires a clean RPi5 I/O VM build")
+    with tarfile.open(package / "materials/sources.tar.xz") as archive:
+        member = archive.getmember("libc-materials/manifest.json")
+        if not member.isfile() or member.size > 1024 * 1024:
+            raise ValueError("invalid libc build materials")
+        manifest = json.load(archive.extractfile(member))
+        for record in manifest["files"]:
+            name = record["name"]
+            if Path(name).name != name:
+                raise ValueError("invalid libc material name")
+            item = archive.getmember("libc-materials/" + name)
+            if not item.isfile() or item.size != record["bytes"]:
+                raise ValueError("libc source size differs from build record")
+            with archive.extractfile(item) as data:
+                if hashlib.file_digest(data, "sha256").hexdigest() != record["sha256"]:
+                    raise ValueError("libc source checksum differs from build record")
+    return metadata
+
+
+def prepare_io(hyper, package):
+    if package is None:
+        source = ROOT / "work/sources/io-vm"
+        if not source.is_dir():
+            raise ValueError("--source requires --io-package for an I/O image")
+        package = ROOT / "work/io-package"
+        if not package.exists():
+            run(
                 sys.executable,
-                "-B",
-                str(hyper / "scripts/fetch-io-vm.py"),
+                "tools/libc-materials.py",
+                "--output",
+                "target/io-vm/libc-materials",
+                cwd=source,
+            )
+            run(
+                "make",
+                "base",
+                "PLATFORM=rpi5",
+                "CROSS_COMPILE=aarch64-linux-gnu-",
+                "JOBS=4",
+                cwd=source,
+            )
+            run(
+                sys.executable,
+                "tools/export-package.py",
                 "--platform",
                 "rpi5",
-            ],
-            text=True,
-        ).strip()
-    )
-    manifest = json.loads((package / "oci-manifest.json").read_text())
-    shutil.copy2(package / "oci-manifest.json", dist / "io-vm-manifest.json")
-    sys.path.insert(0, str(hyper / "scripts"))
-    spec = importlib.util.spec_from_file_location(
-        "fetcher", hyper / "scripts/fetch-io-vm.py"
-    )
-    fetcher = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(fetcher)
-    oras = fetcher.ensure_oras()
-    repository = io_lock["platforms"]["rpi5"]["reference"].split("@")[0]
-    collected = set()
-    for layer in manifest["layers"]:
-        name = layer["annotations"]["org.opencontainers.image.title"]
-        if name not in ("sources.tar.xz", "kernel.config"):
-            continue
-        output = dist / ("io-vm-" + name)
-        run(
-            str(oras),
-            "blob",
-            "fetch",
-            "--output",
-            str(output),
-            repository + "@" + layer["digest"],
-        )
-        if (
-            sha(output) != layer["digest"].removeprefix("sha256:")
-            or output.stat().st_size != layer["size"]
-        ):
-            raise ValueError("I/O source material checksum mismatch")
-        collected.add(name)
-    if collected != {"sources.tar.xz", "kernel.config"}:
-        raise ValueError("I/O package is missing required source materials")
+                "--output",
+                str(package),
+                cwd=source,
+            )
+    validate_io_materials(hyper, package)
+    return package
+
+
+def collect_io_materials(package, dist):
+    for source, target in (
+        ("manifest.json", "io-vm-build.json"),
+        ("sources.tar.xz", "io-vm-sources.tar.xz"),
+        ("kernel.config", "io-vm-kernel.config"),
+    ):
+        shutil.copy2(package / "materials" / source, dist / target)
 
 
 def write_inventory(dist, lock, profile, target, image, digest):
@@ -198,35 +250,42 @@ def main():
     parser.add_argument(
         "--checkout-only",
         action="store_true",
-        help="fetch pinned HypeR and validate I/O libc provenance without building",
+        help="resolve and assemble source inputs without building",
+    )
+    parser.add_argument(
+        "--source", type=Path, help="already assembled, resolved system source"
+    )
+    parser.add_argument(
+        "--io-package",
+        type=Path,
+        help="verified RPi5 boot package with build materials",
     )
     args = parser.parse_args()
-
-    lock = json.loads((ROOT / "hyper.lock.json").read_text())
-    hyper = checkout_hyper(lock)
-    if args.profile != "native":
-        libc_pin = json.loads((ROOT / "materials/io-libc.json").read_text())
-        materials.validate_libc_pin(hyper, libc_pin)
+    hyper = args.source.resolve() if args.source else checkout_hyper()
+    lock = json.loads((hyper / "source-inventory.json").read_text())
     if args.checkout_only:
         return
+
+    io_package = (
+        prepare_io(hyper, args.io_package.resolve() if args.io_package else None)
+        if args.profile != "native"
+        else None
+    )
 
     dist = ROOT / "dist" / args.profile
     if dist.exists():
         raise ValueError(f"refusing to overwrite {dist}; use a fresh output directory")
     dist.mkdir(parents=True)
 
-    target = build_image(hyper, args.profile)
+    target = build_image(hyper, args.profile, io_package)
     image = hyper / "target/board/rpi5-native/disk.img"
     digest = compress_image(image, dist, args.profile)
-    collect_hyper_materials(hyper, dist, lock["revision"])
+    collect_hyper_materials(hyper, dist, "HEAD")
     collect_boot_materials(hyper, dist)
     cache = ROOT / "work/materials-cache"
     materials.collect_rust(hyper, dist / "rust-materials.tar.gz", cache / "crates")
     if args.profile != "native":
-        collect_io_materials(hyper, dist)
-        materials.collect_libc(
-            hyper, dist / "io-libc-materials.tar.gz", cache / "libc", libc_pin
-        )
+        collect_io_materials(io_package, dist)
     if args.profile == "sd":
         kernel_pin = json.loads((ROOT / "materials/alpine-kernel.json").read_text())
         materials.collect_alpine(
