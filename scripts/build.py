@@ -30,22 +30,23 @@ def sha(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def checkout_hyper():
-    """Reuse this build's snapshot; a fresh work directory resolves latest main."""
-    hyper = ROOT / "work/HypeR"
-    if (hyper / "source-inventory.json").exists():
+def checkout_hyper(work):
+    """Resolve once; preparation happens after the selected compiler is installed."""
+    hyper = work / "source"
+    if (hyper / "project.py").is_file() and (work / "source-snapshot.json").is_file():
         return hyper
-    control = ROOT / "work/control"
+    control = work / "control"
     control.mkdir(parents=True, exist_ok=True)
     for name in ("ci", "manifest"):
-        run(
-            "git",
-            "clone",
-            "--depth=1",
-            f"https://github.com/HypeR-Proj/{name}.git",
-            str(control / name),
-        )
-    snapshot = ROOT / "work/source-snapshot.json"
+        if not (control / name).exists():
+            run(
+                "git",
+                "clone",
+                "--depth=1",
+                f"https://github.com/HypeR-Proj/{name}.git",
+                str(control / name),
+            )
+    snapshot = work / "source-snapshot.json"
     run(
         sys.executable,
         str(control / "ci/tools/workspace.py"),
@@ -55,7 +56,6 @@ def checkout_hyper():
         "--output",
         str(snapshot),
     )
-    sources = hyper
     run(
         sys.executable,
         str(control / "ci/tools/workspace.py"),
@@ -63,31 +63,59 @@ def checkout_hyper():
         "--snapshot",
         str(snapshot),
         "--directory",
-        str(sources),
-    )
-    run(
-        sys.executable,
-        str(sources / "project.py"),
-        "--workspace",
-        str(sources),
-        "prepare",
+        str(hyper),
     )
     return hyper
 
 
-def build_image(hyper, profile, io_package=None):
+def project_command(hyper, output, action):
+    result = subprocess.check_output(
+        [
+            sys.executable,
+            str(hyper / "project.py"),
+            "--workspace",
+            str(hyper),
+            "--out",
+            str(output),
+            action,
+        ],
+        text=True,
+        env={**release_environment(), "ARCH": "aarch64"},
+    )
+    return Path(result.strip().splitlines()[-1])
+
+
+def release_environment():
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith(
+            ("IO_VM_", "RPI5_", "BOARD_", "NATIVE_", "APP_", "KERNEL_", "HYPER_BUILD_")
+        )
+        and name
+        not in (
+            "MAKEFLAGS",
+            "MAKEOVERRIDES",
+            "MAKELEVEL",
+            "MFLAGS",
+            "HYPER_MAKE_OVERRIDES",
+            "SYSTEM_CONFIG",
+            "CONFIG_FILE",
+            "HYPER_WORKSPACE",
+            "OUT",
+        )
+    }
+
+
+def build_image(hyper, profile, io_package=None, output=None):
     target = {
         "native": "rpi5-bringup",
         "io-bringup": "rpi5-io-bringup",
         "sd": "rpi5-sd",
     }[profile]
     # Do not inherit local dependency/board overrides into a release build.
-    env = {
-        name: value
-        for name, value in os.environ.items()
-        if not name.startswith(("IO_VM_", "RPI5_", "BOARD_", "NATIVE_"))
-        and name not in ("MAKEFLAGS", "MAKEOVERRIDES")
-    }
+    env = release_environment()
+    env["SYSTEM_CONFIG"] = ""
     if io_package is not None:
         env["IO_VM_PACKAGE"] = str(io_package)
     run(
@@ -95,6 +123,7 @@ def build_image(hyper, profile, io_package=None):
         target,
         "ARCH=aarch64",
         "BOARD_IMAGE_REPLACE=--replace",
+        *(["OUT=" + str(output)] if output is not None else []),
         cwd=hyper,
         env=env,
     )
@@ -113,23 +142,27 @@ def compress_image(image, dist, profile):
     return digest
 
 
-def collect_hyper_materials(hyper, dist, revision):
+def collect_hyper_materials(hyper, dist, output):
     for name in ("LICENSE", "NOTICE"):
         if (hyper / name).exists():
             shutil.copy2(hyper / name, dist / f"HypeR-{name}")
     run(
         sys.executable,
         str(hyper / "project.py"),
+        "--out",
+        str(output),
         "archive",
         str(dist / "HypeR-source.tar.xz"),
     )
-    shutil.copy2(hyper / "source-inventory.json", dist / "source-inventory.json")
+    shutil.copy2(output / "state/source-inventory.json", dist / "source-inventory.json")
 
 
-def collect_boot_materials(hyper, dist):
+def collect_boot_materials(hyper, dist, environment=None):
     boot = Path(
         subprocess.check_output(
-            [sys.executable, "-B", str(hyper / "scripts/fetch-rpi5-boot.py")], text=True
+            [sys.executable, "-B", str(hyper / "scripts/fetch-rpi5-boot.py")],
+            text=True,
+            env=environment,
         ).strip()
     )
     for source, name in [
@@ -174,7 +207,7 @@ def validate_io_materials(hyper, package):
     return metadata
 
 
-def prepare_io(hyper, package):
+def prepare_io(hyper, package, environment=None):
     if package is None:
         package = Path(
             subprocess.check_output(
@@ -186,6 +219,7 @@ def prepare_io(hyper, package):
                     "--materials",
                 ],
                 text=True,
+                env=environment,
             ).strip()
         )
     validate_io_materials(hyper, package)
@@ -241,36 +275,69 @@ def main():
         type=Path,
         help="verified RPi5 boot package with build materials",
     )
+    parser.add_argument(
+        "--out", type=Path, default=Path(os.environ.get("OUT", ROOT / "out"))
+    )
     args = parser.parse_args()
-    hyper = args.source.resolve() if args.source else checkout_hyper()
-    lock = json.loads((hyper / "source-inventory.json").read_text())
+    output = args.out.resolve()
+    work = output / "build/pi5-images/work"
+    system_output = output / "build/pi5-images/system"
+    hyper = args.source.resolve() if args.source else checkout_hyper(work)
     if args.checkout_only:
+        project_command(hyper, system_output, "inventory")
+        print(hyper)
         return
+    # Validate explicit package inputs before generating or overwriting any image.
+    if args.profile != "native" and args.io_package:
+        validate_io_materials(hyper, args.io_package.resolve())
+    view = project_command(hyper, system_output, "prepare")
+    lock = json.loads(project_command(hyper, system_output, "inventory").read_bytes())
+    environment = {
+        **release_environment(),
+        "HYPER_BUILD_VIEW": "1",
+        "OUT": str(system_output),
+        "TMPDIR": str(system_output / "tmp"),
+    }
+    (system_output / "tmp").mkdir(parents=True, exist_ok=True)
 
     io_package = (
-        prepare_io(hyper, args.io_package.resolve() if args.io_package else None)
+        prepare_io(
+            view, args.io_package.resolve() if args.io_package else None, environment
+        )
         if args.profile != "native"
         else None
     )
 
-    dist = ROOT / "dist" / args.profile
+    dist = output / "dist/pi5-images" / args.profile
     if dist.exists():
         raise ValueError(f"refusing to overwrite {dist}; use a fresh output directory")
     dist.mkdir(parents=True)
 
-    target = build_image(hyper, args.profile, io_package)
-    image = hyper / "target/board/rpi5-native/disk.img"
+    target = build_image(hyper, args.profile, io_package, system_output)
+    if (
+        json.loads(project_command(hyper, system_output, "inventory").read_bytes())
+        != lock
+    ):
+        raise ValueError("source snapshot changed during image construction; retry")
+    image = view / "target/board/rpi5-native/disk.img"
     digest = compress_image(image, dist, args.profile)
-    collect_hyper_materials(hyper, dist, "HEAD")
-    collect_boot_materials(hyper, dist)
-    cache = ROOT / "work/materials-cache"
-    materials.collect_rust(hyper, dist / "rust-materials.tar.gz", cache / "crates")
+    collect_hyper_materials(hyper, dist, system_output)
+    if json.loads((dist / "source-inventory.json").read_bytes()) != lock:
+        raise ValueError("source snapshot changed during material collection; retry")
+    collect_boot_materials(view, dist, environment)
+    cache = output / "cache/pi5-materials"
+    materials.collect_rust(
+        view,
+        dist / "rust-materials.tar.gz",
+        cache / "crates",
+        sdk=system_output / "sdk/aarch64",
+    )
     if args.profile != "native":
         collect_io_materials(io_package, dist)
     if args.profile == "sd":
         kernel_pin = json.loads((ROOT / "materials/alpine-kernel.json").read_text())
         materials.collect_alpine(
-            hyper, dist / "alpine-materials.tar.gz", cache / "alpine", kernel_pin
+            view, dist / "alpine-materials.tar.gz", cache / "alpine", kernel_pin
         )
     write_inventory(dist, lock, args.profile, target, image, digest)
     print(dist)
