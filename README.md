@@ -53,3 +53,16 @@ This repository is part of the [HypeR workspace](https://github.com/HypeR-Proj/H
 The image workflow is manual. It resolves current component `main` branches once per build;
 `source-inventory.json` records the selected inputs. `materials/legacy` is historical only.
 Appliance build records carry matching libc sources; there is no HypeR revision to advance manually.
+
+## Output directories
+
+`make image PROFILE=native OUT=/work/hyper-output` builds from the current HypeR
+workspace when invoked inside one. In an independent checkout it first resolves
+rolling source inputs. `python3 scripts/build.py` also accepts `--out` and `--source`.
+All source downloads, build views, SDKs, material caches and distribution assets
+live under the selected OUT. Assets are written to `OUT/dist/pi5-images/PROFILE`;
+existing distribution directories are never overwritten.
+
+The workflow remains manually dispatched and separate from system verification.
+Checkout-only mode does not compile Kconfig or require the selected Rust compiler;
+preparation runs after the workflow installs that compiler.

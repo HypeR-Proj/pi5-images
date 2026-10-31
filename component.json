@@ -18,5 +18,20 @@
       "{component}/tests"
     ]
   ],
-  "packages": []
+  "packages": [],
+  "build": {
+    "makefile": "mk/build.mk",
+    "actions": {
+      "*": [
+        [
+          "make",
+          "-C",
+          "{source}",
+          "{action}",
+          "OUT={output}"
+        ]
+      ]
+    }
+  },
+  "test_requires_rust": false
 }

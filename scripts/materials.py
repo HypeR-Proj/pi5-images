@@ -53,7 +53,7 @@ def add_json(archive, name, data):
     archive.addfile(info, io.BytesIO(payload))
 
 
-def collect_rust(hyper, output, cache):
+def collect_rust(hyper, output, cache, sdk=None):
     packages = {}
     locks = [hyper / "kernel/Cargo.lock", hyper / "app/Cargo.lock"]
     for lock in locks:
@@ -67,7 +67,7 @@ def collect_rust(hyper, output, cache):
             if key in packages and packages[key]["checksum"] != package["checksum"]:
                 raise ValueError(f"conflicting dependency checksum: {key}")
             packages[key] = package
-    rust_source = hyper / "target/sdk/aarch64/share/hyper/rust-src"
+    rust_source = (sdk or hyper / "target/sdk/aarch64") / "share/hyper/rust-src"
     if not (rust_source / "COPYRIGHT-library.html").is_file():
         raise ValueError("assembled Rust source and copyright inventory are required")
     inventory = []

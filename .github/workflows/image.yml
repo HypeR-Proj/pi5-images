@@ -26,6 +26,8 @@ jobs:
         profile: ${{ fromJSON(inputs.profile && inputs.profile != 'all' && format('["{0}"]', inputs.profile) || '["native","io-bringup","sd"]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      OUT: ${{ github.workspace }}/out
     steps:
       - uses: actions/checkout@v4
       - name: Resolve rolling HypeR source inputs
@@ -38,7 +40,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang cmake cpio lld llvm make \
             dosfstools mtools e2fsprogs erofs-utils squashfs-tools device-tree-compiler xz-utils qemu-system-arm
-          toolchain=$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' work/HypeR/rust-toolchain.toml)
+          toolchain=$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' "$OUT/build/pi5-images/work/source/rust-toolchain.toml")
           test -n "$toolchain"
           rustup toolchain install "$toolchain" --profile minimal \
             --component rust-src --component llvm-tools --target aarch64-unknown-none
@@ -54,11 +56,11 @@ jobs:
         run: |
           args=()
           if [ "$PROFILE" = io-bringup ]; then
-            args+=(--vm-config work/HypeR/target/board/rpi5-native/bringup/vms.json)
+            args+=(--vm-config "$OUT/build/pi5-images/system/workspace/aarch64/target/board/rpi5-native/bringup/vms.json")
           fi
           python3 scripts/smoke.py --profile "$PROFILE" \
-            --kernel work/HypeR/kernel/target/aarch64-unknown-none/kernel/hyper.img \
-            --initramfs work/HypeR/target/board/rpi5-native/bootstrap.cpio \
+            --kernel "$OUT/build/pi5-images/system/workspace/aarch64/kernel/target/aarch64-unknown-none/kernel/hyper.img" \
+            --initramfs "$OUT/build/pi5-images/system/workspace/aarch64/target/board/rpi5-native/bootstrap.cpio" \
             --log smoke.log "${args[@]}"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -69,7 +71,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: pi5-${{ matrix.profile }}
-          path: dist/${{ matrix.profile }}/
+          path: ${{ env.OUT }}/dist/pi5-images/${{ matrix.profile }}/
           compression-level: 0
           if-no-files-found: error
           retention-days: 7

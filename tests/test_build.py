@@ -4,6 +4,7 @@
 import importlib.util
 import json
 import lzma
+import shutil
 import sys
 from pathlib import Path
 import tempfile
@@ -18,6 +19,55 @@ spec.loader.exec_module(build)
 
 
 class BuildTests(unittest.TestCase):
+    def test_native_distribution_uses_prepared_view_and_common_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source, output, view = root / "source", root / "out", root / "prepared"
+            source.mkdir()
+            image = view / "target/board/rpi5-native/disk.img"
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"image fixture")
+            inventory = root / "inventory.json"
+            inventory.write_text('{"components": {}}')
+            with (
+                patch.object(
+                    build, "project_command", side_effect=[view, inventory, inventory]
+                ),
+                patch.object(
+                    build, "build_image", return_value="rpi5-bringup"
+                ) as image_build,
+                patch.object(
+                    build,
+                    "collect_hyper_materials",
+                    side_effect=lambda hyper, dist, output: shutil.copyfile(
+                        inventory, dist / "source-inventory.json"
+                    ),
+                ) as sources,
+                patch.object(build, "collect_boot_materials"),
+                patch.object(build.materials, "collect_rust") as rust,
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "build.py",
+                        "--profile",
+                        "native",
+                        "--source",
+                        str(source),
+                        "--out",
+                        str(output),
+                    ],
+                ),
+            ):
+                build.main()
+            system = output / "build/pi5-images/system"
+            dist = output / "dist/pi5-images/native"
+            self.assertTrue((dist / "hyper-rpi5-native.img.xz").is_file())
+            image_build.assert_called_once_with(source, "native", None, system)
+            sources.assert_called_once_with(source, dist, system)
+            self.assertEqual(rust.call_args.kwargs["sdk"], system / "sdk/aarch64")
+            self.assertFalse((source / "target").exists())
+
     def test_invalid_io_package_stops_before_image_build(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -81,6 +131,7 @@ class BuildTests(unittest.TestCase):
             with (
                 patch.object(build, "ROOT", root),
                 patch.object(build, "checkout_hyper", return_value=root),
+                patch.object(build, "project_command"),
                 patch.object(build, "build_image") as compile_image,
                 patch.object(
                     sys, "argv", ["build.py", "--profile", "native", "--checkout-only"]
@@ -116,7 +167,9 @@ class BuildTests(unittest.TestCase):
         ):
             target = build.build_image(Path("/checkout"), "sd")
         self.assertEqual(target, "rpi5-sd")
-        self.assertEqual(run.call_args.kwargs["env"], {"PATH": "/usr/bin"})
+        self.assertEqual(
+            run.call_args.kwargs["env"], {"PATH": "/usr/bin", "SYSTEM_CONFIG": ""}
+        )
         self.assertEqual(run.call_args.kwargs["cwd"], Path("/checkout"))
         self.assertEqual(
             run.call_args.args,
