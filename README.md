@@ -50,7 +50,8 @@ Run `python3 -m black scripts tests` to apply the shared format.
 ## HypeR workspace integration
 
 This repository is part of the [HypeR workspace](https://github.com/HypeR-Proj/HypeR).
-The image workflow is manual. It resolves current component `main` branches once per build;
+The manifest checks it out at `build/pi5-images/`, beside the build tools and
+component catalogs. The image workflow is manual. It resolves current component `main` branches once per build;
 `source-inventory.json` records the selected inputs. `materials/legacy` is historical only.
 Appliance build records carry matching libc sources; there is no HypeR revision to advance manually.
 

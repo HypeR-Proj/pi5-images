@@ -40,7 +40,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang cmake cpio lld llvm make \
             dosfstools mtools e2fsprogs erofs-utils squashfs-tools device-tree-compiler xz-utils qemu-system-arm
-          toolchain=$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' "$OUT/build/pi5-images/work/source/rust-toolchain.toml")
+          build_tools=$(python3 "$OUT/build/pi5-images/work/source/project.py" path build)
+          toolchain=$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' "$build_tools/rust-toolchain.toml")
           test -n "$toolchain"
           rustup toolchain install "$toolchain" --profile minimal \
             --component rust-src --component llvm-tools --target aarch64-unknown-none

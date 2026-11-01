@@ -80,7 +80,7 @@ Power-loss durability, device-reset recovery, physical DMA retirement and
 extended/concurrent load remain [deferred qualification](https://hyper-proj.github.io/HypeR/docs/project/roadmap.html#deferred-hardware-qualification).
 These historical results do not certify a newly built image on physical hardware.
 
-The [manual hardware fixtures](https://github.com/HypeR-Proj/ci/blob/main/hardware/storage/README.md) create
+The [manual hardware fixtures](https://github.com/HypeR-Proj/system-tests/blob/main/hardware/storage/README.md) create
 separate development images under explicit output directories. They enlarge
 the test configuration partition and optionally add guest iperf3; they are not
 default build or distribution profiles. Their manifests record the actual
