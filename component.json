@@ -4,10 +4,6 @@
   "version": 1,
   "name": "pi5-images",
   "kind": "distribution",
-  "origin": {
-    "repository": "https://github.com/roolrz/HypeR-pi5-images",
-    "commit": "5b43b1f2e283e2b297b1294b0eec7fd4cf041118"
-  },
   "tests": [
     [
       "python3",
@@ -18,7 +14,6 @@
       "{component}/tests"
     ]
   ],
-  "packages": [],
   "build": {
     "makefile": "mk/build.mk",
     "actions": {
